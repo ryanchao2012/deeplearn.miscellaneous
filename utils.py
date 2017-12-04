@@ -5,7 +5,7 @@ from sklearn.model_selection import (
 import time
 import numpy as np
 import pandas as pd
-
+from skimage.transform import sk_rescale
 from keras import backend as K  # noqa
 import keras.datasets as datasets
 
@@ -19,6 +19,28 @@ available_datasets = [
     'mnist', 'fashion_mnist', 'cifar',
     'cifar10', 'cifar100', 'imdb', 'reuters'
 ]
+
+
+class ANSIColors:
+    HEADER = '\033[95m'
+    OKBLUE = '\033[94m'
+    OKGREEN = '\033[92m'
+    WARNING = '\033[93m'
+    FAIL = '\033[91m'
+    ENDC = '\033[0m'
+    BOLD = '\033[1m'
+    UNDERLINE = '\033[4m'
+
+
+def deprecated(f):
+    def _inner(*args, **kargs):
+        print(
+            ANSIColors.WARNING +
+            '[WARNING] {}: this method is deprecated.'.format(f.__name__) +
+            ANSIColors.ENDC
+        )
+        return f(*args, **kargs)
+    return _inner
 
 
 def concat_sample(*array_pairs, axis=0):
@@ -69,7 +91,7 @@ def down_sampling(X, y, num=1000):
     return X[sampling_index].copy(), y[sampling_index].copy()
 
 
-def load_keras_dataset(name, model_type='mlp', feature_type='image'):
+def load_keras_dataset(name, model_type='mlp', feature_type='image', rescale=None):
 
     if name not in available_datasets:
         msg = '''
@@ -116,6 +138,16 @@ def load_keras_dataset(name, model_type='mlp', feature_type='image'):
                 x_test = x_test.reshape(num_test, img_rows, img_cols, channels)
                 input_shape = (img_rows, img_cols, channels)
 
+            if isinstance(rescale, float):
+                x_train, (img_rows, img_cols) = _batch_rescale(x_train, rescale)
+                x_test, (_, _) = _batch_rescale(x_test, rescale)
+
+                input_shape = (
+                    (channels, img_rows, img_cols)
+                    if K.image_data_format() == 'channels_first'
+                    else (img_rows, img_cols, channels)
+                )
+
         x_train = x_train.astype('float32')
         x_test = x_test.astype('float32')
         x_train /= 255.0
@@ -129,6 +161,39 @@ def load_keras_dataset(name, model_type='mlp', feature_type='image'):
     return (x_train, y_train), (x_test, y_test), (input_shape, num_classes)
 
 
+def _batch_rescale(X, scale):
+    # X should be 4D tensor
+    shape = X.shape
+    if len(shape) != 4:
+        raise ValueError('Input dimension must be 4, i.e., (batch_size, nrow, ncol, channels)')
+
+    num_samples = shape[0]
+    img_rows, img_cols, channels = (
+        (shape[2], shape[3], shape[1]) if K.image_data_format() == 'channels_first' else shape[1:]
+    )
+    new_rows, new_cols, _ = sk_rescale(X[0, :].reshape(img_rows, img_cols, channels), scale, mode='constant')
+
+    new_X = np.zeros(num_samples, new_rows, new_cols, channels). # noqa
+
+    for i, x in enumerate(X):
+        new_X[i, :] = sk_rescale(X[i, :].reshape(img_rows, img_cols, channels), scale, mode='constant')
+
+    return (
+        new_X.transpose(0, 3, 1, 2)
+        if K.image_data_format() == 'channels_first'
+        else new_X,
+        (new_rows, new_cols)
+    )
+
+
+def decode_from_latent(ax, decoder,
+                       grid_x=np.linspace(-1.5, 1.5, 16),
+                       grid_y=np.linspace(-1.5, 1.5, 16),
+                       spacing=1):
+    pass
+
+
+@deprecated
 def evaluate_keras_model(dataset_name, build_fn, X, y,
                          epochs=1, batch_size=32,
                          n_fold=2, shuffle=True,
@@ -142,6 +207,7 @@ def evaluate_keras_model(dataset_name, build_fn, X, y,
     return results
 
 
+@deprecated
 def evaluate_model(estimator, X, y,
                    n_fold=2, shuffle=True,
                    random_seed=None, verbose=1):
