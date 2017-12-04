@@ -5,7 +5,7 @@ from sklearn.model_selection import (
 import time
 import numpy as np
 import pandas as pd
-from skimage.transform import sk_rescale
+from skimage.transform import rescale as sk_rescale
 from keras import backend as K  # noqa
 import keras.datasets as datasets
 
@@ -91,7 +91,7 @@ def down_sampling(X, y, num=1000):
     return X[sampling_index].copy(), y[sampling_index].copy()
 
 
-def load_keras_dataset(name, model_type='mlp', feature_type='image', rescale=None):
+def load_keras_dataset(name, model_type='mlp', feature_type='image'):
 
     if name not in available_datasets:
         msg = '''
@@ -138,15 +138,15 @@ def load_keras_dataset(name, model_type='mlp', feature_type='image', rescale=Non
                 x_test = x_test.reshape(num_test, img_rows, img_cols, channels)
                 input_shape = (img_rows, img_cols, channels)
 
-            if isinstance(rescale, float):
-                x_train, (img_rows, img_cols) = _batch_rescale(x_train, rescale)
-                x_test, (_, _) = _batch_rescale(x_test, rescale)
+            # if isinstance(rescale, float):
+            #     x_train, (img_rows, img_cols) = _batch_rescale(x_train, rescale)
+            #     x_test, (_, _) = _batch_rescale(x_test, rescale)
 
-                input_shape = (
-                    (channels, img_rows, img_cols)
-                    if K.image_data_format() == 'channels_first'
-                    else (img_rows, img_cols, channels)
-                )
+            #     input_shape = (
+            #         (channels, img_rows, img_cols)
+            #         if K.image_data_format() == 'channels_first'
+            #         else (img_rows, img_cols, channels)
+            #     )
 
         x_train = x_train.astype('float32')
         x_test = x_test.astype('float32')
@@ -161,29 +161,40 @@ def load_keras_dataset(name, model_type='mlp', feature_type='image', rescale=Non
     return (x_train, y_train), (x_test, y_test), (input_shape, num_classes)
 
 
-def _batch_rescale(X, scale):
+def batch_rescale(X, scale=1.0, to_3ch=True):
     # X should be 4D tensor
     shape = X.shape
     if len(shape) != 4:
         raise ValueError('Input dimension must be 4, i.e., (batch_size, nrow, ncol, channels)')
 
-    num_samples = shape[0]
+    # num_samples = shape[0]
     img_rows, img_cols, channels = (
         (shape[2], shape[3], shape[1]) if K.image_data_format() == 'channels_first' else shape[1:]
     )
-    new_rows, new_cols, _ = sk_rescale(X[0, :].reshape(img_rows, img_cols, channels), scale, mode='constant')
+    new_rows, new_cols, _ = sk_rescale(X[0, :].reshape(img_rows, img_cols, channels), scale, mode='constant').shape
 
-    new_X = np.zeros(num_samples, new_rows, new_cols, channels). # noqa
+    def _iterate(batch_size=1):
+        # new_X = np.zeros((batch_size, new_rows, new_cols, channels), dtype='float32')  # noqa
+        for i, x in enumerate(X):
+            new_x = sk_rescale(X[i, :].reshape(img_rows, img_cols, channels), scale, mode='constant')
+            if to_3ch and channels != 3:
+                # TODO: what the fuck is going on???
+                new_x = np.resize(new_x.copy(), (new_rows, new_cols, 3))
+            transposed = (
+                new_x.transpose(2, 0, 1)
+                if K.image_data_format() == 'channels_first'
+                else new_x
+            )
 
-    for i, x in enumerate(X):
-        new_X[i, :] = sk_rescale(X[i, :].reshape(img_rows, img_cols, channels), scale, mode='constant')
+            yield np.expand_dims(transposed, axis=0)
 
-    return (
-        new_X.transpose(0, 3, 1, 2)
+    ch = 3 if to_3ch else channels
+    input_shape = (
+        (ch, new_rows, new_cols)
         if K.image_data_format() == 'channels_first'
-        else new_X,
-        (new_rows, new_cols)
+        else (new_rows, new_cols, ch)
     )
+    return _iterate(), input_shape
 
 
 def decode_from_latent(ax, decoder,
