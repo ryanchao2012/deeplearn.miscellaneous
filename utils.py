@@ -161,25 +161,25 @@ def load_keras_dataset(name, model_type='mlp', feature_type='image'):
     return (x_train, y_train), (x_test, y_test), (input_shape, num_classes)
 
 
-def batch_rescale(X, scale=1.0, to_3ch=True):
+def batch_rescale(X, scale=1.0, to_3ch=True, to_generator=True):
     # X should be 4D tensor
     shape = X.shape
     if len(shape) != 4:
         raise ValueError('Input dimension must be 4, i.e., (batch_size, nrow, ncol, channels)')
 
-    # num_samples = shape[0]
+    num_samples = shape[0]
     img_rows, img_cols, channels = (
         (shape[2], shape[3], shape[1]) if K.image_data_format() == 'channels_first' else shape[1:]
     )
     new_rows, new_cols, _ = sk_rescale(X[0, :].reshape(img_rows, img_cols, channels), scale, mode='constant').shape
 
     def _iterate(batch_size=1):
+        rng_idx = np.random.permutation(num_samples)
         # new_X = np.zeros((batch_size, new_rows, new_cols, channels), dtype='float32')  # noqa
-        for i, x in enumerate(X):
+        for i, x in zip(rng_idx, X):
             new_x = sk_rescale(X[i, :].reshape(img_rows, img_cols, channels), scale, mode='constant')
             if to_3ch and channels != 3:
-                # TODO: what the fuck is going on???
-                new_x = np.resize(new_x.copy(), (new_rows, new_cols, 3))
+                new_x = np.stack((new_x[:, :, 0],) * 3, axis=-1).astype('float32')
             transposed = (
                 new_x.transpose(2, 0, 1)
                 if K.image_data_format() == 'channels_first'
@@ -194,7 +194,14 @@ def batch_rescale(X, scale=1.0, to_3ch=True):
         if K.image_data_format() == 'channels_first'
         else (new_rows, new_cols, ch)
     )
-    return _iterate(), input_shape
+    if to_generator:
+        return _iterate(), input_shape
+    else:
+        new_X = np.zeros((num_samples, new_rows, new_cols, ch), dtype='float32')
+        for i, x in enumerate(_iterate()):
+            new_X[i, :] = x[0, :]
+
+        return new_X, input_shape
 
 
 def decode_from_latent(ax, decoder,
