@@ -134,9 +134,14 @@ class BaseClassifier(object):
         else:
             return keras.losses.binary_crossentropy
 
-    def __call__(self):
-        # TODO: should I cach model ?
-        return self.create()
+    def __call__(self, do_compile=True):
+        # TODO: should I cache model ?
+        model = self.create()
+
+        if do_compile:
+            return self.compile(model)
+        else:
+            return model
 
     def getnet(self, name):
 
@@ -234,23 +239,27 @@ class ZCnnClassifier(BaseClassifier, VariationalMixin):
 
     def __init__(self, input_shape, num_classes, activation='sigmoid',
                  latent_dim=16, vi_penalty=1.0, sigma=1.0):
-        super().__init__(input_shape, num_classes, activation='sigmoid')
+        super().__init__(input_shape, num_classes, activation=activation)
         self.latent_dim = latent_dim
         self.vi_penalty = vi_penalty
         self.sigma = sigma
 
     def create(self):
         x = Input(shape=self.input_shape)
-        ly1 = Conv2D(32, (3, 3), activation=self.activation)(x)
+
+        ly0 = Conv2D(64, (3, 3), activation=self.activation)(x)
+        ly1 = MaxPooling2D(pool_size=(2, 2))(ly0)
         ly2 = Conv2D(64, (3, 3), activation=self.activation)(ly1)
         ly3 = MaxPooling2D(pool_size=(2, 2))(ly2)
-        ly4 = Conv2D(1, (1, 1), activation=self.activation)(ly3)
-        ly5 = Dropout(0.25)(ly4)
-        flatten = Flatten()(ly5)
+        # ly4 = Dropout(0.25)(ly3)
+        flatten = Flatten()(ly3)
+        # z = Dense(self.latent_dim, activation=self.activation)(flatten)
         z_mean = Dense(self.latent_dim, activation=self.activation)(flatten)
         z_log_var = Dense(self.latent_dim, activation=self.activation)(flatten)
         z = Lambda(self.sampling, output_shape=(self.latent_dim,),
                    arguments=dict(latent_dim=self.latent_dim, sigma=self.sigma))([z_mean, z_log_var])
+
+        # ly6 = Dropout(0.5)(z)
 
         yh = Dense(self.num_classes, activation=self.output_activation, name='classifier')(z)
 
@@ -260,22 +269,31 @@ class ZCnnClassifier(BaseClassifier, VariationalMixin):
             flatten_dim = 1
             for val in self.input_shape:
                 flatten_dim *= val
+        # ly7 = Dropout(0.5)(z)
         ly8 = Dense(flatten_dim, activation='sigmoid')(z)
         xh = Reshape(self.input_shape, name='decoder')(ly8)
 
         model = Model(inputs=x, outputs=[yh, xh])
-
-        model.compile(loss=dict(classifier=self.xent_loss,
-                                decoder=self.vloss(z_mean, z_log_var, penalty=self.vi_penalty)),
-                      optimizer=keras.optimizers.Adadelta(),
-                      metrics=['accuracy'])
-
         encoder = Model(x, z)
-        decoder = Model(x, xh)
+
         classifier = Model(x, yh)
 
+        self.model = model
         self.encoder = encoder
-        self.decoder = decoder
         self.classifier = classifier
+        # self.loss = self.xent_loss
+        self.loss = dict(classifier=self.xent_loss,
+                         decoder=self.vloss(z_mean, z_log_var, penalty=self.vi_penalty))
+        self.optimizer = 'adam'
+        self.metrics = ['accuracy']
+
+        return model
+
+    def compile(self, model, *args, **kwargs):
+        model.compile(
+            loss=self.loss,
+            optimizer=self.optimizer,
+            metrics=self.metrics
+        )
 
         return model
