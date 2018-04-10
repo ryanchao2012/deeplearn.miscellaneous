@@ -153,6 +153,14 @@ class BaseClassifier(object):
     def create(self):
         raise NotImplementedError
 
+    def compile(self, model, *args, **kwargs):
+        model.compile(
+            loss=self.loss,
+            optimizer=self.optimizer,
+            metrics=self.metrics
+        )
+
+        return model
 
 class VariationalMixin(object):
 
@@ -186,12 +194,15 @@ class MlpClassifier(BaseClassifier):
         encoder = Model(x, latent)
         model = model = Model(x, classifier)
 
-        model.compile(loss=self.xent_loss,
-                      optimizer=keras.optimizers.Adadelta(),
-                      metrics=['accuracy'])
+#        model.compile(loss=self.xent_loss,
+#                      optimizer=keras.optimizers.Adadelta(),
+#                      metrics=['accuracy'])
 
         self.encoder = encoder
         self.classifier = model
+        self.loss = self.xent_loss
+        self.optimizer = keras.optimizers.Adadelta()
+        self.metrics = ['accuracy']
 
         return model
 
@@ -218,10 +229,10 @@ class ZMlpClassifier(BaseClassifier, VariationalMixin):
 
         model = Model(inputs=x, outputs=[yh, xh])
 
-        model.compile(loss=dict(classifier=self.xent_loss,
-                                decoder=self.vloss(z_mean, z_log_var, penalty=self.vi_penalty)),
-                      optimizer=keras.optimizers.Adadelta(),
-                      metrics=['accuracy'])
+#        model.compile(loss=dict(classifier=self.xent_loss,
+#                                decoder=self.vloss(z_mean, z_log_var, penalty=self.vi_penalty)),
+#                      optimizer=keras.optimizers.Adadelta(),
+#                      metrics=['accuracy'])
 
         encoder = Model(x, z)
         decoder = Model(x, xh)
@@ -230,6 +241,11 @@ class ZMlpClassifier(BaseClassifier, VariationalMixin):
         self.encoder = encoder
         self.decoder = decoder
         self.classifier = classifier
+
+        self.loss = dict(classifier=self.xent_loss,
+                         decoder=self.vloss(z_mean, z_log_var, penalty=self.vi_penalty))
+        self.optimizer = keras.optimizers.Adadelta()
+        self.metrics = ['accuracy']
 
         return model
 
