@@ -1,4 +1,4 @@
-Deeplearning miscellaneous
+Machine learning miscellaneous
 =
 
 
